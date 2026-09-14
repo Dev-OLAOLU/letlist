@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", "Times New Roman", ui-serif, Georgia, serif;
+
+  --color-bg: #f3eee6;
+  --color-bg-elevated: #faf7f2;
+  --color-bg-subtle: #e8e1d6;
+  --color-fg: #1a1815;
+  --color-fg-muted: #6b645c;
+  --color-fg-subtle: #8a8278;
+  --color-accent: #2c4a40;
+  --color-accent-fg: #f3eee6;
+  --color-border: #1a18151f;
+  --color-border-strong: #1a181538;
+  --color-whatsapp: #215c3d;
+  --color-whatsapp-fg: #f6f3ee;
+  --color-danger: #8f3a2a;
+  --color-ring: #2c4a40;
+
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+
+  --text-display: clamp(2.5rem, 1.4rem + 4vw, 4.25rem);
+  --text-title: clamp(1.5rem, 1.2rem + 1.4vw, 2.25rem);
+}
+
+@layer base {
+  html {
+    background-color: var(--color-bg);
+    color: var(--color-fg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    font-family: var(--font-display);
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background-color: var(--color-accent);
+    color: var(--color-accent-fg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
