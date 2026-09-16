@@ -15,9 +15,11 @@ export async function ensureListingsSchema() {
       connected boolean not null default false,
       connected_at timestamptz,
       inbox_phone text not null default '2348098765432',
+      agent_phone text not null default '2348098765432',
       last_inbound_at timestamptz
     )
   `);
+  await sql.query(`alter table whatsapp_connection add column if not exists agent_phone text not null default '2348098765432'`);
   await sql.query(`
     create table if not exists whatsapp_inbox (
       id text primary key,

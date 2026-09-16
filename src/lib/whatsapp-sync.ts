@@ -1,12 +1,20 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { getSql } from "@/lib/db";
-import { whatsappRuntime, type WhatsappCloudStatus } from "@/lib/whatsapp-config";
+import { DESK_WHATSAPP, normalizeNgPhone } from "@/lib/listings";
+import {
+  publicCloudStatus,
+  whatsappRuntime,
+  WHATSAPP_WEBHOOK_CHALLENGE,
+  WHATSAPP_WEBHOOK_PATH,
+  type WhatsappCloudStatus,
+} from "@/lib/whatsapp-config";
 
 export type WhatsappConnection = {
   connected: boolean;
   connectedAt: string | null;
   inboxPhone: string;
+  agentPhone: string;
   lastInboundAt: string | null;
 };
 
@@ -42,12 +50,27 @@ async function ensureConnection() {
   const { ensureListingsSchema } = await import("@/lib/listing-schema");
   const sql = await getSql();
   await ensureListingsSchema();
-  const inboxPhone = whatsappRuntime().inboxPhone;
+  const runtime = whatsappRuntime();
   await sql`
-    insert into whatsapp_connection (id, connected, inbox_phone)
-    values (${"desk"}, ${false}, ${inboxPhone})
-    on conflict (id) do update set inbox_phone = excluded.inbox_phone
+    insert into whatsapp_connection (id, connected, inbox_phone, agent_phone)
+    values (${"desk"}, ${false}, ${runtime.inboxPhone}, ${runtime.agentPhone})
+    on conflict (id) do nothing
   `;
+  // Env wins only while the desk still has the placeholder number.
+  if (runtime.inboxPhone && runtime.inboxPhone !== DESK_WHATSAPP) {
+    await sql`
+      update whatsapp_connection
+      set inbox_phone = ${runtime.inboxPhone}
+      where id = ${"desk"} and inbox_phone = ${DESK_WHATSAPP}
+    `;
+  }
+  if (runtime.agentPhone && runtime.agentPhone !== DESK_WHATSAPP) {
+    await sql`
+      update whatsapp_connection
+      set agent_phone = ${runtime.agentPhone}
+      where id = ${"desk"} and agent_phone = ${DESK_WHATSAPP}
+    `;
+  }
   await sql`
     update listing_groups
     set watching = false
@@ -70,8 +93,9 @@ export const getWhatsappStatus = createServerFn({ method: "POST" }).handler(asyn
     connected: boolean;
     connected_at: string | Date | null;
     inbox_phone: string;
+    agent_phone: string | null;
     last_inbound_at: string | Date | null;
-  }>`select connected, connected_at, inbox_phone, last_inbound_at from whatsapp_connection where id = ${"desk"}`;
+  }>`select connected, connected_at, inbox_phone, agent_phone, last_inbound_at from whatsapp_connection where id = ${"desk"}`;
   const row = conn[0];
   const runtime = whatsappRuntime();
   const groups = await sql<{
@@ -110,15 +134,10 @@ export const getWhatsappStatus = createServerFn({ method: "POST" }).handler(asyn
       connected: Boolean(row?.connected),
       connectedAt: toIso(row?.connected_at ?? null),
       inboxPhone: row?.inbox_phone ?? runtime.inboxPhone,
+      agentPhone: row?.agent_phone || row?.inbox_phone || runtime.agentPhone,
       lastInboundAt: toIso(row?.last_inbound_at ?? null),
     } satisfies WhatsappConnection,
-    cloud: {
-      configured: runtime.cloudConfigured,
-      signatureRequired: runtime.signatureRequired,
-      webhookPath: runtime.webhookPath,
-      webhookUrl: runtime.webhookUrl,
-      verifyTokenDefault: "letlist-whatsapp",
-    } satisfies WhatsappCloudStatus,
+    cloud: publicCloudStatus() satisfies WhatsappCloudStatus,
     groups: groups.map(
       (g): WatchedGroup => ({
         id: g.id,
@@ -144,6 +163,43 @@ export const getWhatsappStatus = createServerFn({ method: "POST" }).handler(asyn
   };
 });
 
+export const getDeskPhones = createServerFn({ method: "POST" }).handler(async () => {
+  await ensureConnection();
+  const sql = await getSql();
+  const rows = await sql<{ inbox_phone: string; agent_phone: string | null }>`
+    select inbox_phone, agent_phone from whatsapp_connection where id = ${"desk"}
+  `;
+  const runtime = whatsappRuntime();
+  return {
+    inboxPhone: rows[0]?.inbox_phone || runtime.inboxPhone,
+    agentPhone: rows[0]?.agent_phone || rows[0]?.inbox_phone || runtime.agentPhone,
+  };
+});
+
+export const saveWhatsappNumbers = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({
+        inboxPhone: z.string().min(10).max(24),
+        agentPhone: z.string().min(10).max(24),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const inbox = normalizeNgPhone(data.inboxPhone);
+    const agent = normalizeNgPhone(data.agentPhone);
+    if (!inbox) throw new Error("Inbox number looks wrong. Use a Nigerian mobile, e.g. 0803 000 0000.");
+    if (!agent) throw new Error("Your WhatsApp number looks wrong. Use a Nigerian mobile, e.g. 0803 000 0000.");
+    await ensureConnection();
+    const sql = await getSql();
+    await sql`
+      update whatsapp_connection
+      set inbox_phone = ${inbox}, agent_phone = ${agent}
+      where id = ${"desk"}
+    `;
+    return { ok: true as const, inboxPhone: inbox, agentPhone: agent };
+  });
+
 export const connectWhatsappInbox = createServerFn({ method: "POST" }).handler(async () => {
   const { bootstrapListings } = await import("@/lib/listing-api");
   await bootstrapListings();
@@ -163,6 +219,41 @@ export const connectWhatsappInbox = createServerFn({ method: "POST" }).handler(a
   const pulled = await pullWatchedGroupPosts();
   return { ok: true as const, pulled };
 });
+
+export const testWhatsappWebhook = createServerFn({ method: "POST" })
+  .validator((d: unknown) => z.object({ origin: z.string().max(200).optional() }).parse(d ?? {}))
+  .handler(async ({ data }) => {
+    const runtime = whatsappRuntime();
+    const origin = (data.origin ?? runtime.publicUrl).replace(/\/$/, "");
+    const webhookUrl = origin ? `${origin}${WHATSAPP_WEBHOOK_PATH}` : runtime.webhookUrl;
+    if (!webhookUrl) {
+      return {
+        ok: false as const,
+        reason: "Open this desk on your live Letlist URL so Meta has an HTTPS callback.",
+        webhookUrl: "",
+      };
+    }
+    const url = `${webhookUrl}?hub.mode=subscribe&hub.verify_token=${encodeURIComponent(runtime.verifyToken)}&hub.challenge=${WHATSAPP_WEBHOOK_CHALLENGE}`;
+    try {
+      const res = await fetch(url, { method: "GET" });
+      const body = (await res.text()).trim();
+      const ok = res.ok && body === WHATSAPP_WEBHOOK_CHALLENGE;
+      return {
+        ok,
+        status: res.status,
+        webhookUrl,
+        reason: ok
+          ? "Handshake passed. Paste this callback into Meta and tap Verify and save."
+          : `Webhook answered ${res.status}. Check the verify token matches letlist-whatsapp.`,
+      };
+    } catch {
+      return {
+        ok: false as const,
+        webhookUrl,
+        reason: "Could not reach the webhook from here. Try Test handshake in the browser on this page.",
+      };
+    }
+  });
 
 export const setGroupWatching = createServerFn({ method: "POST" })
   .validator((d: unknown) => z.object({ id: z.string().min(1), watching: z.boolean() }).parse(d))

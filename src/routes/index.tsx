@@ -9,18 +9,20 @@ import { Input } from "@/components/ui/input";
 import { AREAS, BUDGETS, DESK_WHATSAPP, searchShareText } from "@/lib/listings";
 import { areaStats, listGroups, searchListings } from "@/lib/listing-api";
 import { compactSearch, parseSearch, toFilters, type SearchInput } from "@/lib/search-params";
+import { getDeskPhones } from "@/lib/whatsapp-sync";
 
 export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>) => parseSearch(search),
   loaderDeps: ({ search }) => search,
   loader: async ({ deps }) => {
     const filters = toFilters(deps);
-    const [listings, areas, groups] = await Promise.all([
+    const [listings, areas, groups, phones] = await Promise.all([
       searchListings({ data: filters }),
       areaStats(),
       listGroups(),
+      getDeskPhones(),
     ]);
-    return { listings, areas, groups };
+    return { listings, areas, groups, phones };
   },
   component: Home,
 });
@@ -256,7 +258,7 @@ function Home() {
             </p>
           </div>
           <a
-            href={`https://wa.me/${DESK_WHATSAPP}`}
+            href={`https://wa.me/${initial.phones?.agentPhone || DESK_WHATSAPP}`}
             target="_blank"
             rel="noreferrer"
             className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-bg px-5 text-sm font-medium text-fg"

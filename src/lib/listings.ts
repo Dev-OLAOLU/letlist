@@ -152,7 +152,7 @@ export function listingTitle(
   return `${kind} · ${place}`;
 }
 
-export function whatsappHref(listing: Listing): string {
+export function whatsappHref(listing: Listing, phone: string = DESK_WHATSAPP): string {
   const text = [
     `Hi, I saw this listing on Letlist and I want to inspect.`,
     ``,
@@ -161,7 +161,8 @@ export function whatsappHref(listing: Listing): string {
     `Rent ${formatNairaFull(listing.rentAnnual)} / year`,
     `Ref: ${listing.id}`,
   ].join("\n");
-  return `https://wa.me/${DESK_WHATSAPP}?text=${encodeURIComponent(text)}`;
+  const digits = (phone || DESK_WHATSAPP).replace(/\D/g, "") || DESK_WHATSAPP;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
 }
 
 export function searchShareText(filters: SearchFilters, count: number): string {
@@ -184,6 +185,20 @@ export function formatInboxPhone(e164: string): string {
     return `0${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
   }
   return e164.startsWith("+") ? e164 : `+${digits}`;
+}
+
+/** Nigerian mobile → 234XXXXXXXXXX. Null if it cannot be a WhatsApp number. */
+export function normalizeNgPhone(raw: string): string | null {
+  let d = raw.replace(/\D/g, "");
+  if (d.startsWith("00")) d = d.slice(2);
+  if (d.startsWith("234") && d.length === 13) return d;
+  if (d.startsWith("0") && d.length === 11) return `234${d.slice(1)}`;
+  if (d.length === 10 && /^[789]/.test(d)) return `234${d}`;
+  return null;
+}
+
+export function isPlaceholderPhone(raw: string): boolean {
+  return raw.replace(/\D/g, "") === DESK_WHATSAPP;
 }
 
 export function parseAmenities(raw: string): string[] {

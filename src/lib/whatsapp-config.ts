@@ -3,6 +3,7 @@ import { DESK_WHATSAPP } from "@/lib/listings";
 
 export const WHATSAPP_VERIFY_TOKEN_DEFAULT = "letlist-whatsapp";
 export const WHATSAPP_WEBHOOK_PATH = "/api/whatsapp/webhook";
+export const WHATSAPP_WEBHOOK_CHALLENGE = "letlist-ok";
 
 function digits(value: string): string {
   return value.replace(/\D/g, "");
@@ -24,6 +25,7 @@ export function whatsappRuntime() {
   const accessToken = env("WHATSAPP_ACCESS_TOKEN");
   const phoneNumberId = env("WHATSAPP_PHONE_NUMBER_ID");
   const inboxPhone = digits(env("WHATSAPP_INBOX_PHONE") ?? DESK_WHATSAPP);
+  const agentPhone = digits(env("WHATSAPP_AGENT_PHONE") ?? inboxPhone);
   const publicUrl = publicBaseUrl();
 
   return {
@@ -32,6 +34,7 @@ export function whatsappRuntime() {
     accessToken,
     phoneNumberId,
     inboxPhone,
+    agentPhone,
     publicUrl,
     webhookPath: WHATSAPP_WEBHOOK_PATH,
     webhookUrl: publicUrl ? `${publicUrl}${WHATSAPP_WEBHOOK_PATH}` : "",
@@ -45,5 +48,24 @@ export type WhatsappCloudStatus = {
   signatureRequired: boolean;
   webhookPath: string;
   webhookUrl: string;
+  verifyToken: string;
   verifyTokenDefault: string;
+  hasAccessToken: boolean;
+  hasPhoneNumberId: boolean;
+  hasAppSecret: boolean;
 };
+
+export function publicCloudStatus(): WhatsappCloudStatus {
+  const runtime = whatsappRuntime();
+  return {
+    configured: runtime.cloudConfigured,
+    signatureRequired: runtime.signatureRequired,
+    webhookPath: runtime.webhookPath,
+    webhookUrl: runtime.webhookUrl,
+    verifyToken: runtime.verifyToken,
+    verifyTokenDefault: WHATSAPP_VERIFY_TOKEN_DEFAULT,
+    hasAccessToken: Boolean(runtime.accessToken),
+    hasPhoneNumberId: Boolean(runtime.phoneNumberId),
+    hasAppSecret: Boolean(runtime.appSecret),
+  };
+}

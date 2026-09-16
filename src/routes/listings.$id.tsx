@@ -12,14 +12,16 @@ import {
   propertyTypeLabel,
 } from "@/lib/listings";
 import { getListing, markListingTaken, similarListings } from "@/lib/listing-api";
+import { getDeskPhones } from "@/lib/whatsapp-sync";
 
 export const Route = createFileRoute("/listings/$id")({
   loader: async ({ params }) => {
-    const [listing, similar] = await Promise.all([
+    const [listing, similar, phones] = await Promise.all([
       getListing({ data: { id: params.id } }),
       similarListings({ data: { id: params.id } }),
+      getDeskPhones(),
     ]);
-    return { listing, similar };
+    return { listing, similar, phones };
   },
   component: ListingPage,
 });
@@ -183,7 +185,7 @@ function ListingPage() {
                 <p className="mt-5 rounded-md bg-bg-subtle px-3 py-2 text-sm text-fg-muted">This one has been taken.</p>
               ) : (
                 <div className="mt-5 space-y-2">
-                  <WhatsappButton listing={listing} />
+                  <WhatsappButton listing={listing} phone={initial.phones.agentPhone} />
                   <Button
                     variant="ghost"
                     className="w-full"
