@@ -29,7 +29,7 @@ Set these on the Vercel project (Production + Preview). Do not commit them.
 
 | Name | Required | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | Yes | Neon Postgres. Without it, listings do not persist across deploys. |
+| `DATABASE_URL` | Yes | Neon Postgres. Without it Vercel falls back to in-memory PGLite and listings reset on every cold start. |
 | `WHATSAPP_VERIFY_TOKEN` | Yes | Must match Meta’s verify token. Use `letlist-whatsapp`. |
 | `WHATSAPP_APP_SECRET` | Yes in production | Signs inbound webhooks. |
 | `WHATSAPP_ACCESS_TOKEN` | Yes for Cloud API | Permanent system user token. |

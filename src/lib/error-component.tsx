@@ -4,9 +4,16 @@ import { TriangleAlert } from "lucide-react";
 const FALLBACK_MESSAGE = "An unexpected error occurred. Try reloading the page.";
 
 function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === "string" && error) return error;
-  return FALLBACK_MESSAGE;
+  const raw =
+    error instanceof Error && error.message
+      ? error.message
+      : typeof error === "string" && error
+        ? error
+        : "";
+  if (/pglite\.data|ENOENT.*_libs|DATABASE_URL/i.test(raw)) {
+    return "Listings database is not configured. Set DATABASE_URL on Vercel to a Neon Postgres URL, then redeploy.";
+  }
+  return raw || FALLBACK_MESSAGE;
 }
 
 export function AppErrorComponent({ error }: ErrorComponentProps) {
