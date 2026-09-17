@@ -23,6 +23,12 @@ export type ListingGroup = {
   lastSyncedAt: string | null;
 };
 
+export type ListingMedia = {
+  id: string;
+  kind: "image" | "video";
+  mime: string;
+};
+
 export type Listing = {
   id: string;
   groupId: string;
@@ -41,6 +47,7 @@ export type Listing = {
   description: string;
   amenities: string[];
   imageKey: string;
+  media: ListingMedia[];
   status: ListingStatus;
   rawPost: string | null;
   postedAt: string;
@@ -111,7 +118,16 @@ export const BUDGETS: { label: string; min?: number; max?: number }[] = [
 
 export function listingImageSrc(imageKey: string): string {
   if (imageKey.startsWith("/")) return imageKey;
+  if (imageKey.startsWith("med-")) return `/api/media/${imageKey}`;
   return `/images/listings/${imageKey}.jpg`;
+}
+
+export function listingCoverSrc(listing: Pick<Listing, "imageKey" | "media">): string {
+  const photo = listing.media?.find((m) => m.kind === "image");
+  if (photo) return `/api/media/${photo.id}`;
+  const video = listing.media?.find((m) => m.kind === "video");
+  if (video) return `/api/media/${video.id}`;
+  return listingImageSrc(listing.imageKey);
 }
 
 export function formatNaira(n: number): string {

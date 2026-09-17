@@ -76,7 +76,7 @@ type ListingRow = {
   posted_at: string | Date;
 };
 
-function toListing(row: ListingRow): Listing {
+function toListing(row: ListingRow, media: Listing["media"] = []): Listing {
   return {
     id: row.id,
     groupId: row.group_id,
@@ -95,10 +95,21 @@ function toListing(row: ListingRow): Listing {
     description: row.description,
     amenities: parseAmenities(row.amenities),
     imageKey: row.image_key,
+    media,
     status: row.status === "taken" ? "taken" : "available",
     rawPost: row.raw_post,
     postedAt: typeof row.posted_at === "string" ? row.posted_at : row.posted_at.toISOString(),
   };
+}
+
+async function withMedia(listings: Listing[]): Promise<Listing[]> {
+  if (listings.length === 0) return listings;
+  const { mediaForListings } = await import("@/lib/whatsapp-media");
+  const map = await mediaForListings(listings.map((l) => l.id));
+  return listings.map((listing) => ({
+    ...listing,
+    media: map.get(listing.id) ?? [],
+  }));
 }
 
 const LISTING_SELECT = `
@@ -196,7 +207,7 @@ export const searchListings = createServerFn({ method: "POST" })
       `select ${LISTING_SELECT} from listings l join listing_groups g on g.id = l.group_id ${whereSql} order by ${order}`,
       params,
     );
-    const listings = rows.map(toListing);
+    const listings = await withMedia(rows.map((row) => toListing(row)));
     return { listings, total: listings.length };
   });
 
@@ -209,7 +220,10 @@ export const getListing = createServerFn({ method: "POST" })
       `select ${LISTING_SELECT} from listings l join listing_groups g on g.id = l.group_id where l.id = $1`,
       [data.id],
     );
-    return rows[0] ? toListing(rows[0]) : null;
+    const listing = rows[0] ? toListing(rows[0]) : null;
+    if (!listing) return null;
+    const [hydrated] = await withMedia([listing]);
+    return hydrated ?? listing;
   });
 
 export const listGroups = createServerFn({ method: "POST" }).handler(async (): Promise<ListingGroup[]> => {
@@ -278,7 +292,7 @@ export const similarListings = createServerFn({ method: "POST" })
        limit 4`,
       [data.id, listing.area, listing.bedrooms, listing.rent_annual],
     );
-    return rows.map(toListing);
+    return withMedia(rows.map((row) => toListing(row)));
   });
 
 const IMAGE_KEYS = [

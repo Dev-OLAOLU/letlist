@@ -20,6 +20,12 @@ export async function ensureListingsSchema() {
     )
   `);
   await sql.query(`alter table whatsapp_connection add column if not exists agent_phone text not null default '2348098765432'`);
+  await sql.query(`alter table whatsapp_connection add column if not exists meta_phone_number_id text`);
+  await sql.query(`alter table whatsapp_connection add column if not exists meta_verified_name text`);
+  await sql.query(`alter table whatsapp_connection add column if not exists meta_display_phone text`);
+  await sql.query(`alter table whatsapp_connection add column if not exists meta_waba_id text`);
+  await sql.query(`alter table whatsapp_connection add column if not exists last_pull_at timestamptz`);
+  await sql.query(`alter table whatsapp_connection add column if not exists meta_error text`);
   await sql.query(`
     create table if not exists whatsapp_inbox (
       id text primary key,
@@ -36,4 +42,38 @@ export async function ensureListingsSchema() {
   await sql.query(`create index if not exists listings_source_hash_idx on listings (source_hash)`);
   await sql.query(`create index if not exists whatsapp_inbox_received_idx on whatsapp_inbox (received_at desc)`);
   await sql.query(`create index if not exists whatsapp_inbox_status_idx on whatsapp_inbox (status)`);
+  await sql.query(`
+    create table if not exists listing_media (
+      id text primary key,
+      listing_id text,
+      sender text,
+      wa_media_id text,
+      kind text not null,
+      mime text not null,
+      byte_size integer not null,
+      bytes bytea not null,
+      created_at timestamptz not null default now()
+    )
+  `);
+  await sql.query(`create index if not exists listing_media_listing_idx on listing_media (listing_id, created_at)`);
+  try {
+    const idx = await sql.query<{ indexdef: string }>(
+      `select indexdef from pg_indexes where indexname = 'listing_media_wa_idx'`,
+    );
+    if (idx[0]?.indexdef && !/where/i.test(idx[0].indexdef)) {
+      await sql.query(`drop index if exists listing_media_wa_idx`);
+    }
+  } catch {
+    /* pg_indexes may be unavailable; create below is still idempotent */
+  }
+  await sql.query(
+    `create unique index if not exists listing_media_wa_idx on listing_media (wa_media_id) where wa_media_id is not null`,
+  );
+  await sql.query(`
+    create table if not exists whatsapp_media_context (
+      sender text primary key,
+      listing_id text not null,
+      updated_at timestamptz not null default now()
+    )
+  `);
 }

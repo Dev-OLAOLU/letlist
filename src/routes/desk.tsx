@@ -41,8 +41,8 @@ function DeskPage() {
       <p className="text-sm font-medium uppercase tracking-[0.14em] text-fg-muted">Agent desk</p>
       <h1 className="mt-3 font-display text-display tracking-tight">Keep the groups feeding the hub</h1>
       <p className="mt-4 max-w-2xl text-fg-muted">
-        WhatsApp is the data centre. Save the Meta inbox number and your personal line, hook the webhook, then
-        forward every listing. Paste a post when you are not at the inbox.
+        WhatsApp is the data centre. This machine pulls from your Meta-registered Cloud API number. Paste the access
+        token and Phone number ID on the desk, tap Connect Meta, then forward housing-group posts to that inbox.
       </p>
 
       <div className="mt-8 flex flex-wrap gap-2">

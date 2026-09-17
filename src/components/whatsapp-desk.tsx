@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { formatDistanceToNow } from "date-fns";
-import { Check, Copy, ExternalLink, MessageCircle, RefreshCw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Check, Copy, ExternalLink, ImagePlus, MessageCircle, RefreshCw, Terminal, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,9 +16,11 @@ import {
 } from "@/lib/listings";
 import {
   addWatchedGroup,
+  connectMetaCloud,
   connectWhatsappInbox,
   getWhatsappStatus,
-  ingestForwardedPost,
+  pullMetaInbox,
+  saveMetaCloudKeys,
   saveWhatsappNumbers,
   setGroupWatching,
   syncWatchedGroups,
@@ -26,6 +28,7 @@ import {
   type IngestSummary,
 } from "@/lib/whatsapp-sync";
 import { SAMPLE_POSTS } from "@/lib/whatsapp-parser";
+import { IMAGE_MAX_BYTES, MEDIA_PER_LISTING, VIDEO_MAX_BYTES, kindFromMime } from "@/lib/whatsapp-media-kind";
 import { cn } from "@/lib/utils";
 
 type Status = Awaited<ReturnType<typeof getWhatsappStatus>>;
@@ -35,13 +38,20 @@ function summarize(pulled: IngestSummary[]): string {
   const updated = pulled.filter((p) => p.action === "updated").length;
   const ignored = pulled.filter((p) => p.action === "ignored").length;
   const duplicate = pulled.filter((p) => p.action === "duplicate").length;
+  const media = pulled.reduce((n, p) => n + (p.mediaCount ?? 0), 0);
   const parts: string[] = [];
   if (updated) parts.push(`${updated} updated`);
   if (published) parts.push(`${published} new`);
   if (duplicate) parts.push(`${duplicate} already in`);
   if (ignored) parts.push(`${ignored} skipped`);
+  if (media) parts.push(`${media} photo${media === 1 ? "" : "s"}/video${media === 1 ? "" : "s"}`);
   if (parts.length === 0) return "No new posts in watched groups.";
   return `Read ${pulled.length} posts · ${parts.join(" · ")}`;
+}
+
+function mediaFlash(count?: number): string {
+  if (!count) return "";
+  return count === 1 ? " · 1 photo/video on the card" : ` · ${count} photos/videos on the card`;
 }
 
 function ago(iso: string | null): string {
@@ -104,6 +114,8 @@ export function WhatsappDesk({ initial }: { initial: Status }) {
   const [groupName, setGroupName] = useState("");
   const [areaFocus, setAreaFocus] = useState("");
   const [forward, setForward] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [handshake, setHandshake] = useState<"idle" | "ok" | "fail">("idle");
@@ -113,6 +125,7 @@ export function WhatsappDesk({ initial }: { initial: Status }) {
     queryKey: ["whatsapp-status"],
     queryFn: () => getWhatsappStatus(),
     initialData: initial,
+    refetchInterval: 20_000,
   });
 
   const data = statusQuery.data ?? initial;
@@ -128,6 +141,10 @@ export function WhatsappDesk({ initial }: { initial: Status }) {
   const [agentDraft, setAgentDraft] = useState(() =>
     agentReady ? formatInboxPhone(savedAgent) : "",
   );
+  const [tokenDraft, setTokenDraft] = useState("");
+  const [phoneIdDraft, setPhoneIdDraft] = useState(initial.meta?.phoneNumberId ?? "");
+  const [wabaDraft, setWabaDraft] = useState(initial.meta?.wabaId ?? "");
+  const [appSecretDraft, setAppSecretDraft] = useState("");
 
   const [liveOrigin, setLiveOrigin] = useState("");
   useEffect(() => {
@@ -164,6 +181,62 @@ export function WhatsappDesk({ initial }: { initial: Status }) {
       await invalidate();
     },
     onError: (err) => setError(err instanceof Error ? err.message : "Could not save numbers."),
+  });
+
+  const saveKeys = useMutation({
+    mutationFn: () =>
+      saveMetaCloudKeys({
+        data: {
+          accessToken: tokenDraft || undefined,
+          phoneNumberId: phoneIdDraft || undefined,
+          wabaId: wabaDraft || undefined,
+          appSecret: appSecretDraft || undefined,
+        },
+      }),
+    onSuccess: async (result) => {
+      setError(null);
+      setTokenDraft("");
+      setAppSecretDraft("");
+      setPhoneIdDraft(result.phoneNumberId);
+      setFlash(`Meta keys stored on this machine · token ending ${result.tokenTail}.`);
+      await invalidate();
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : "Could not store Meta keys."),
+  });
+
+  const connectMeta = useMutation({
+    mutationFn: () =>
+      connectMetaCloud({
+        data: {
+          accessToken: tokenDraft || undefined,
+          phoneNumberId: phoneIdDraft || undefined,
+          wabaId: wabaDraft || undefined,
+          appSecret: appSecretDraft || undefined,
+        },
+      }),
+    onSuccess: async (result) => {
+      setError(null);
+      setTokenDraft("");
+      setAppSecretDraft("");
+      setPhoneIdDraft(result.phoneNumberId);
+      setFlash(
+        result.verifiedName
+          ? `Connected ${result.verifiedName}${result.displayPhone ? ` · ${result.displayPhone}` : ""}. ${result.note}`
+          : result.note,
+      );
+      await invalidate();
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : "Could not connect Meta."),
+  });
+
+  const pullMeta = useMutation({
+    mutationFn: () => pullMetaInbox(),
+    onSuccess: async (result) => {
+      setError(null);
+      setFlash(result.note);
+      await invalidate();
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : "Pull failed."),
   });
 
   const connect = useMutation({
@@ -206,25 +279,68 @@ export function WhatsappDesk({ initial }: { initial: Status }) {
   });
 
   const ingest = useMutation({
-    mutationFn: () => ingestForwardedPost({ data: { body: forward } }),
+    mutationFn: async () => {
+      const form = new FormData();
+      form.set("body", forward);
+      for (const file of files) form.append("media", file);
+      const res = await fetch("/api/whatsapp/ingest", { method: "POST", body: form });
+      const json = (await res.json().catch(() => null)) as (IngestSummary & { error?: string }) | null;
+      if (!res.ok) throw new Error(json?.error || "Could not ingest that post.");
+      if (!json) throw new Error("Could not ingest that post.");
+      return json;
+    },
     onSuccess: async (result) => {
       setError(null);
       setForward("");
+      setFiles([]);
       setFlash(
         result.action === "updated"
-          ? `Updated ${result.title ?? "listing"} from ${result.groupName}`
+          ? `Updated ${result.title ?? "listing"} from ${result.groupName}${mediaFlash(result.mediaCount)}`
           : result.action === "published"
-            ? `Published ${result.title ?? "listing"} from ${result.groupName}`
-            : result.reason ?? "Post read.",
+            ? `Published ${result.title ?? "listing"} from ${result.groupName}${mediaFlash(result.mediaCount)}`
+            : `${result.reason ?? "Post read."}${mediaFlash(result.mediaCount)}`,
       );
       await invalidate();
     },
     onError: (err) => setError(err instanceof Error ? err.message : "Could not ingest that post."),
   });
 
+  const addFiles = (incoming: File[]) => {
+    const next: File[] = [];
+    const notes: string[] = [];
+    for (const file of incoming) {
+      const kind = kindFromMime(file.type);
+      if (!kind) {
+        notes.push(`${file.name} is not a photo or video Letlist can show.`);
+        continue;
+      }
+      const cap = kind === "video" ? VIDEO_MAX_BYTES : IMAGE_MAX_BYTES;
+      if (file.size > cap) {
+        notes.push(kind === "video" ? `${file.name} is over 16MB.` : `${file.name} is over 8MB.`);
+        continue;
+      }
+      next.push(file);
+    }
+    setFiles((prev) => {
+      const merged = [...prev, ...next];
+      if (merged.length > MEDIA_PER_LISTING) {
+        notes.push("Up to 12 photos/videos per listing.");
+        return merged.slice(0, MEDIA_PER_LISTING);
+      }
+      return merged;
+    });
+    if (notes.length) setError(notes[0] ?? null);
+    else setError(null);
+  };
+
   const watchingCount = data.groups.filter((g) => g.watching).length;
   const cloudReady = Boolean(data.cloud?.configured);
-  const keysReady = Boolean(data.cloud?.hasAccessToken && data.cloud?.hasPhoneNumberId && data.cloud?.hasAppSecret);
+  const meta = data.meta;
+  const metaLinked = Boolean(meta?.linked);
+  const pullerRunning = Boolean(meta?.pullerRunning);
+  const metaKeysReady = Boolean(
+    (tokenDraft.trim() || meta?.hasToken) && (phoneIdDraft.replace(/\D/g, "") || meta?.phoneNumberId),
+  );
 
   const numbersValid = useMemo(
     () => Boolean(normalizeNgPhone(inboxDraft) && normalizeNgPhone(agentDraft || inboxDraft)),
@@ -272,17 +388,22 @@ export function WhatsappDesk({ initial }: { initial: Status }) {
             ) : (
               <Badge>Desk idle</Badge>
             )}
-            {cloudReady ? (
+            {cloudReady || metaLinked ? (
               <Badge className="border-accent/30 bg-accent text-accent-fg">Cloud API</Badge>
             ) : (
               <Badge>Cloud API pending</Badge>
             )}
+            {pullerRunning ? (
+              <Badge className="border-accent/30 bg-accent text-accent-fg">Puller on</Badge>
+            ) : (
+              <Badge>Puller idle</Badge>
+            )}
           </div>
         </div>
         <p className="mt-3 max-w-2xl text-sm text-fg-muted">
-          WhatsApp will not let Letlist join the housing groups on your personal number. The registered Cloud API
-          number is the inbox: forward every listing there. Your personal WhatsApp stays on the listing cards so
-          customers reach you.
+          This machine is the Meta puller — the data centre sits on your registered Cloud API number. Paste the
+          access token and Phone number ID from API Setup, then Connect Meta. Housing groups still cannot be joined
+          by Cloud API: forward those posts (text, photos, and videos) to the inbox and the puller reads them here.
         </p>
 
         <div className="mt-6 grid gap-4 lg:grid-cols-2">
@@ -326,6 +447,133 @@ export function WhatsappDesk({ initial }: { initial: Status }) {
             {saveNumbers.isPending ? "Saving…" : "Save numbers"}
           </Button>
         </div>
+      </section>
+
+      <section className="rounded-xl bg-bg-elevated p-5 ring-1 ring-border sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium uppercase tracking-[0.14em] text-fg-muted">On this machine</p>
+            <h2 className="mt-2 font-display text-xl tracking-tight">
+              {metaLinked ? `Meta line · ${meta?.verifiedName || "connected"}` : "Connect the Meta CLI"}
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm text-fg-muted">
+              From{" "}
+              <a
+                href="https://developers.facebook.com/apps/"
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-fg underline-offset-2 hover:underline"
+              >
+                Meta Developers
+              </a>{" "}
+              → your app → WhatsApp → API Setup. Copy Temporary (or system user) access token and Phone number ID.
+              Keys stay on this machine — they are never shown back in full.
+            </p>
+          </div>
+          <Button variant="outline" asChild>
+            <a href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer">
+              API Setup
+              <ExternalLink className="size-4" />
+            </a>
+          </Button>
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <label className="block lg:col-span-2">
+            <span className="text-sm font-medium">Access token</span>
+            <span className="mt-1 block text-sm text-fg-muted">
+              {meta?.hasToken
+                ? `Stored · ending ${meta.tokenTail}. Paste a new one only to replace it.`
+                : "Permanent system-user token is best. Temporary tokens expire in 24 hours."}
+            </span>
+            <Input
+              className="mt-2"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={meta?.hasToken ? "••••••••" : "EAAG…"}
+              value={tokenDraft}
+              onChange={(e) => setTokenDraft(e.target.value)}
+              aria-label="Meta access token"
+            />
+          </label>
+          <label className="block">
+            <span className="text-sm font-medium">Phone number ID</span>
+            <span className="mt-1 block text-sm text-fg-muted">From API Setup, not the digits you dial.</span>
+            <Input
+              className="mt-2"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="123456789012345"
+              value={phoneIdDraft}
+              onChange={(e) => setPhoneIdDraft(e.target.value)}
+              aria-label="Meta phone number ID"
+            />
+          </label>
+          <label className="block">
+            <span className="text-sm font-medium">WhatsApp Business Account ID (optional)</span>
+            <span className="mt-1 block text-sm text-fg-muted">Helps list Cloud API groups on this line.</span>
+            <Input
+              className="mt-2"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="WABA ID"
+              value={wabaDraft}
+              onChange={(e) => setWabaDraft(e.target.value)}
+              aria-label="WhatsApp Business Account ID"
+            />
+          </label>
+          <label className="block lg:col-span-2">
+            <span className="text-sm font-medium">App secret (optional)</span>
+            <span className="mt-1 block text-sm text-fg-muted">
+              App settings → Basic. Needed to verify inbound webhooks on a public site.
+            </span>
+            <Input
+              className="mt-2"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={data.cloud?.hasAppSecret ? "••••••••" : "App secret"}
+              value={appSecretDraft}
+              onChange={(e) => setAppSecretDraft(e.target.value)}
+              aria-label="Meta app secret"
+            />
+          </label>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <Button
+            size="lg"
+            variant="whatsapp"
+            onClick={() => connectMeta.mutate()}
+            disabled={connectMeta.isPending || !metaKeysReady}
+          >
+            <Terminal className="size-4" />
+            {connectMeta.isPending ? "Talking to Meta…" : metaLinked ? "Reconnect Meta" : "Connect Meta"}
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => saveKeys.mutate()}
+            disabled={saveKeys.isPending || !metaKeysReady}
+          >
+            {saveKeys.isPending ? "Saving…" : "Save keys"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => pullMeta.mutate()}
+            disabled={pullMeta.isPending || !meta?.hasToken}
+          >
+            <RefreshCw className={cn("size-4", pullMeta.isPending && "animate-spin")} />
+            {pullMeta.isPending ? "Pulling…" : "Pull now"}
+          </Button>
+        </div>
+        {meta?.displayPhone ? (
+          <p className="mt-4 text-sm text-fg">
+            {meta.verifiedName || "Business line"} · {meta.displayPhone}
+            {meta.lastPullAt ? ` · last pull ${ago(meta.lastPullAt)}` : ""}
+          </p>
+        ) : null}
+        {meta?.error ? <p className="mt-3 text-sm text-danger">{meta.error}</p> : null}
       </section>
 
       <section className="rounded-xl bg-bg-elevated p-5 ring-1 ring-border sm:p-6">
@@ -377,8 +625,8 @@ export function WhatsappDesk({ initial }: { initial: Status }) {
           <p className={cn("mt-4 text-sm", handshake === "fail" ? "text-danger" : "text-fg")}>{handshakeNote}</p>
         ) : (
           <p className="mt-4 text-sm text-fg-muted">
-            Meta only saves the webhook if this URL is public HTTPS (your Vercel site) and the handshake returns the
-            challenge. Do not paste access tokens here — they go on Vercel.
+            Meta only saves a webhook on a public HTTPS site (your live Letlist URL). This machine pulls outbound
+            from Graph API instead — that is the data centre. The webhook is the production backup once Vercel is live.
           </p>
         )}
       </section>
@@ -397,45 +645,73 @@ export function WhatsappDesk({ initial }: { initial: Status }) {
             detail={agentReady ? formatInboxPhone(savedAgent) : "Save the number already in the housing groups."}
           />
           <CheckRow
-            ok={handshake === "ok"}
-            label="Webhook handshake"
-            detail={handshake === "ok" ? "Letlist answered Meta’s verify request." : "Tap Test handshake, then Verify and save in Meta."}
+            ok={metaLinked}
+            label="Meta line"
+            detail={
+              metaLinked
+                ? `${meta?.verifiedName || "Connected"}${meta?.displayPhone ? ` · ${meta.displayPhone}` : ""}`
+                : "Paste access token + Phone number ID, then Connect Meta."
+            }
           />
           <CheckRow
-            ok={keysReady}
-            label="Cloud API keys on Vercel"
+            ok={pullerRunning}
+            label="Puller on this machine"
             detail={
-              keysReady
-                ? "Access token, phone number ID, and app secret are present."
-                : "On Vercel → Environment Variables add WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_APP_SECRET, WHATSAPP_INBOX_PHONE, then redeploy."
+              pullerRunning
+                ? meta?.lastPullNote || "Watching the Meta inbox."
+                : "The puller starts with Letlist and checks Meta every minute."
             }
+          />
+          <CheckRow
+            ok={Boolean(meta?.hasToken && meta?.phoneNumberId)}
+            label="Cloud API keys"
+            detail={
+              meta?.hasToken
+                ? `Token ending ${meta.tokenTail} · ID ${meta.phoneNumberId}`
+                : "Stored on this machine from the form above. Production can use the same values as environment variables."
+            }
+          />
+          <CheckRow
+            ok={handshake === "ok"}
+            label="Webhook handshake"
+            detail={handshake === "ok" ? "Letlist answered Meta’s verify request." : "Needed for the public site. Optional while this machine is pulling."}
           />
           <CheckRow
             ok={connected}
             label="Desk connected"
-            detail={connected ? `Watching ${watchingCount} groups.` : "Tap Connect WhatsApp to start watching groups."}
+            detail={connected ? `Watching ${watchingCount} groups.` : "Connect Meta, or tap Connect WhatsApp to start watching groups."}
           />
         </ul>
         <div className="mt-6 flex flex-col gap-2 sm:flex-row">
           {connected ? (
-            <Button
-              size="lg"
-              variant="secondary"
-              onClick={() => sync.mutate()}
-              disabled={sync.isPending || watchingCount === 0}
-            >
-              <RefreshCw className={cn("size-4", sync.isPending && "animate-spin")} />
-              {sync.isPending ? "Syncing…" : "Sync watched groups"}
-            </Button>
+            <>
+              <Button
+                size="lg"
+                variant="secondary"
+                onClick={() => pullMeta.mutate()}
+                disabled={pullMeta.isPending || !meta?.hasToken}
+              >
+                <RefreshCw className={cn("size-4", pullMeta.isPending && "animate-spin")} />
+                {pullMeta.isPending ? "Pulling…" : "Pull from Meta"}
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => sync.mutate()}
+                disabled={sync.isPending || watchingCount === 0}
+              >
+                {sync.isPending ? "Syncing…" : "Sync watched groups"}
+              </Button>
+            </>
           ) : (
             <Button
               size="lg"
               variant="whatsapp"
-              onClick={() => connect.mutate()}
-              disabled={connect.isPending || !inboxReady}
+              onClick={() => (metaKeysReady ? connectMeta.mutate() : connect.mutate())}
+              disabled={connect.isPending || connectMeta.isPending || (!inboxReady && !metaKeysReady)}
             >
               <MessageCircle className="size-4" />
-              {connect.isPending ? "Connecting…" : "Connect WhatsApp"}
+              {connect.isPending || connectMeta.isPending ? "Connecting…" : "Connect WhatsApp"}
             </Button>
           )}
         </div>
@@ -512,7 +788,8 @@ export function WhatsappDesk({ initial }: { initial: Status }) {
           <section className="rounded-xl bg-bg-elevated p-5 ring-1 ring-border sm:p-6">
             <h2 className="font-display text-xl tracking-tight">Forward a post</h2>
             <p className="mt-2 text-sm text-fg-muted">
-              From a watched group, forward to the inbox — or paste here. Same unit is updated when rent changes.
+              From a watched group, forward the listing — photos and videos included — to the inbox, or paste here and
+              attach the same files. They show on the search card instead of a stand-in photo.
             </p>
             <Textarea
               className="mt-4 min-h-44"
@@ -521,14 +798,59 @@ export function WhatsappDesk({ initial }: { initial: Status }) {
               placeholder="Forwarded from Lekki & Ajah Available Homes…"
               disabled={!connected}
             />
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/3gpp,video/quicktime,.jpg,.jpeg,.png,.webp,.gif,.mp4,.3gp,.mov"
+              multiple
+              className="sr-only"
+              onChange={(e) => {
+                addFiles(Array.from(e.target.files ?? []));
+                e.target.value = "";
+              }}
+            />
+            {files.length > 0 ? (
+              <ul className="mt-3 flex flex-wrap gap-2">
+                {files.map((file, index) => (
+                  <li
+                    key={`${file.name}-${index}`}
+                    className="inline-flex h-11 max-w-full items-center gap-2 rounded-full border border-border bg-bg px-3 text-sm"
+                  >
+                    {file.type.startsWith("video/") ? (
+                      <span className="text-fg-subtle">Video</span>
+                    ) : (
+                      <span className="text-fg-subtle">Photo</span>
+                    )}
+                    <span className="max-w-36 truncate">{file.name}</span>
+                    <button
+                      type="button"
+                      className="inline-flex size-7 items-center justify-center rounded-full text-fg-muted hover:text-fg"
+                      onClick={() => setFiles((prev) => prev.filter((_, i) => i !== index))}
+                      aria-label={`Remove ${file.name}`}
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!connected || files.length >= MEDIA_PER_LISTING}
+                onClick={() => fileRef.current?.click()}
+              >
+                <ImagePlus className="size-4" />
+                Add photos or video
+              </Button>
               {SAMPLE_POSTS.slice(0, 2).map((sample) => (
                 <button
                   key={sample.label}
                   type="button"
                   disabled={!connected}
                   onClick={() => setForward(sample.body)}
-                  className="h-10 rounded-full border border-border bg-bg px-3.5 text-sm text-fg-muted hover:text-fg disabled:opacity-40"
+                  className="h-11 rounded-full border border-border bg-bg px-3.5 text-sm text-fg-muted hover:text-fg disabled:opacity-40"
                 >
                   Try: {sample.label}
                 </button>
@@ -537,7 +859,7 @@ export function WhatsappDesk({ initial }: { initial: Status }) {
             <Button
               className="mt-4 w-full"
               size="lg"
-              disabled={!connected || ingest.isPending || forward.trim().length < 12}
+              disabled={!connected || ingest.isPending || (forward.trim().length < 12 && files.length === 0)}
               onClick={() => ingest.mutate()}
             >
               {ingest.isPending ? "Reading…" : "Read into Letlist"}

@@ -2,13 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Bath, BedDouble, Building2, MapPin } from "lucide-react";
 import { ListingCard } from "@/components/listing-card";
+import { ListingGallery } from "@/components/listing-gallery";
 import { Button } from "@/components/ui/button";
 import { WhatsappButton } from "@/components/whatsapp-button";
 import {
   bedroomLabel,
   formatNaira,
   formatNairaFull,
-  listingImageSrc,
   propertyTypeLabel,
 } from "@/lib/listings";
 import { getListing, markListingTaken, similarListings } from "@/lib/listing-api";
@@ -95,12 +95,8 @@ function ListingPage() {
           All listings
         </Link>
 
-        <div className="mt-4 overflow-hidden rounded-xl bg-bg-subtle">
-          <img
-            src={listingImageSrc(listing.imageKey)}
-            alt=""
-            className="aspect-[16/10] w-full object-cover sm:aspect-[2/1]"
-          />
+        <div className="mt-4">
+          <ListingGallery listing={listing} />
         </div>
 
         <div className="mt-8 grid gap-10 lg:grid-cols-[minmax(0,1fr)_20rem]">

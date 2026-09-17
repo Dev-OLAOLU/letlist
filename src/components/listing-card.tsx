@@ -1,14 +1,18 @@
 import { Link } from "@tanstack/react-router";
 import { formatDistanceToNow } from "date-fns";
+import { Play } from "lucide-react";
 import {
   bedroomLabel,
   formatNaira,
-  listingImageSrc,
+  listingCoverSrc,
   type Listing,
 } from "@/lib/listings";
 
 export function ListingCard({ listing }: { listing: Listing }) {
   const posted = formatDistanceToNow(new Date(listing.postedAt), { addSuffix: true });
+  const media = listing.media ?? [];
+  const coverVideo = media.length > 0 && !media.some((m) => m.kind === "image") && media[0]?.kind === "video";
+  const extra = media.length;
 
   return (
     <Link
@@ -17,14 +21,40 @@ export function ListingCard({ listing }: { listing: Listing }) {
       className="group flex flex-col overflow-hidden rounded-xl bg-bg-elevated shadow-[0_1px_0_var(--color-border)] ring-1 ring-border transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-[0_12px_32px_-18px_var(--color-fg)]"
     >
       <div className="relative aspect-[4/3] overflow-hidden bg-bg-subtle">
-        <img
-          src={listingImageSrc(listing.imageKey)}
-          alt=""
-          className="size-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03]"
-        />
+        {coverVideo ? (
+          <video
+            src={`/api/media/${media[0].id}`}
+            muted
+            playsInline
+            preload="metadata"
+            className="size-full object-cover"
+          />
+        ) : (
+          <img
+            src={listingCoverSrc(listing)}
+            alt=""
+            className="size-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03]"
+          />
+        )}
+        {coverVideo ? (
+          <span className="absolute inset-0 flex items-center justify-center bg-fg/25">
+            <span className="inline-flex size-11 items-center justify-center rounded-full bg-bg/90 text-fg">
+              <Play className="size-4" fill="currentColor" />
+            </span>
+          </span>
+        ) : null}
         <span className="absolute left-3 top-3 rounded-full bg-bg/90 px-2.5 py-1 text-xs font-medium text-fg backdrop-blur-sm">
           {bedroomLabel(listing.bedrooms, listing.propertyType)}
         </span>
+        {extra > 1 ? (
+          <span className="absolute bottom-3 right-3 rounded-full bg-fg/80 px-2.5 py-1 text-xs font-medium text-bg">
+            {extra} from WhatsApp
+          </span>
+        ) : extra === 1 ? (
+          <span className="absolute bottom-3 right-3 rounded-full bg-fg/80 px-2.5 py-1 text-xs font-medium text-bg">
+            From WhatsApp
+          </span>
+        ) : null}
       </div>
       <div className="flex flex-1 flex-col gap-2 p-4">
         <div className="flex items-start justify-between gap-3">

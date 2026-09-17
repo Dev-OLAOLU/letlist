@@ -14,6 +14,9 @@ import { Route as DeskRouteImport } from './routes/desk'
 import { Route as GroupsRouteImport } from './routes/groups'
 import { Route as GroupsIdRouteImport } from './routes/groups.$id'
 import { Route as ListingsIdRouteImport } from './routes/listings.$id'
+import { Route as ApiMediaIdRouteImport } from './routes/api/media.$id'
+import { Route as ApiWhatsappHubRouteImport } from './routes/api/whatsapp/hub'
+import { Route as ApiWhatsappIngestRouteImport } from './routes/api/whatsapp/ingest'
 import { Route as ApiWhatsappWebhookRouteImport } from './routes/api/whatsapp/webhook'
 
 const IndexRoute = IndexRouteImport.update({
@@ -41,6 +44,21 @@ const ListingsIdRoute = ListingsIdRouteImport.update({
   path: '/listings/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMediaIdRoute = ApiMediaIdRouteImport.update({
+  id: '/api/media/$id',
+  path: '/api/media/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiWhatsappHubRoute = ApiWhatsappHubRouteImport.update({
+  id: '/api/whatsapp/hub',
+  path: '/api/whatsapp/hub',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiWhatsappIngestRoute = ApiWhatsappIngestRouteImport.update({
+  id: '/api/whatsapp/ingest',
+  path: '/api/whatsapp/ingest',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiWhatsappWebhookRoute = ApiWhatsappWebhookRouteImport.update({
   id: '/api/whatsapp/webhook',
   path: '/api/whatsapp/webhook',
@@ -53,6 +71,9 @@ export interface FileRoutesByFullPath {
   '/groups': typeof GroupsRouteWithChildren
   '/groups/$id': typeof GroupsIdRoute
   '/listings/$id': typeof ListingsIdRoute
+  '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/whatsapp/hub': typeof ApiWhatsappHubRoute
+  '/api/whatsapp/ingest': typeof ApiWhatsappIngestRoute
   '/api/whatsapp/webhook': typeof ApiWhatsappWebhookRoute
 }
 export interface FileRoutesByTo {
@@ -61,6 +82,9 @@ export interface FileRoutesByTo {
   '/groups': typeof GroupsRouteWithChildren
   '/groups/$id': typeof GroupsIdRoute
   '/listings/$id': typeof ListingsIdRoute
+  '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/whatsapp/hub': typeof ApiWhatsappHubRoute
+  '/api/whatsapp/ingest': typeof ApiWhatsappIngestRoute
   '/api/whatsapp/webhook': typeof ApiWhatsappWebhookRoute
 }
 export interface FileRoutesById {
@@ -70,6 +94,9 @@ export interface FileRoutesById {
   '/groups': typeof GroupsRouteWithChildren
   '/groups/$id': typeof GroupsIdRoute
   '/listings/$id': typeof ListingsIdRoute
+  '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/whatsapp/hub': typeof ApiWhatsappHubRoute
+  '/api/whatsapp/ingest': typeof ApiWhatsappIngestRoute
   '/api/whatsapp/webhook': typeof ApiWhatsappWebhookRoute
 }
 export interface FileRouteTypes {
@@ -80,6 +107,9 @@ export interface FileRouteTypes {
     | '/groups'
     | '/groups/$id'
     | '/listings/$id'
+    | '/api/media/$id'
+    | '/api/whatsapp/hub'
+    | '/api/whatsapp/ingest'
     | '/api/whatsapp/webhook'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -88,6 +118,9 @@ export interface FileRouteTypes {
     | '/groups'
     | '/groups/$id'
     | '/listings/$id'
+    | '/api/media/$id'
+    | '/api/whatsapp/hub'
+    | '/api/whatsapp/ingest'
     | '/api/whatsapp/webhook'
   id:
     | '__root__'
@@ -96,6 +129,9 @@ export interface FileRouteTypes {
     | '/groups'
     | '/groups/$id'
     | '/listings/$id'
+    | '/api/media/$id'
+    | '/api/whatsapp/hub'
+    | '/api/whatsapp/ingest'
     | '/api/whatsapp/webhook'
   fileRoutesById: FileRoutesById
 }
@@ -104,6 +140,9 @@ export interface RootRouteChildren {
   DeskRoute: typeof DeskRoute
   GroupsRoute: typeof GroupsRouteWithChildren
   ListingsIdRoute: typeof ListingsIdRoute
+  ApiMediaIdRoute: typeof ApiMediaIdRoute
+  ApiWhatsappHubRoute: typeof ApiWhatsappHubRoute
+  ApiWhatsappIngestRoute: typeof ApiWhatsappIngestRoute
   ApiWhatsappWebhookRoute: typeof ApiWhatsappWebhookRoute
 }
 
@@ -144,6 +183,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ListingsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/media/$id': {
+      id: '/api/media/$id'
+      path: '/api/media/$id'
+      fullPath: '/api/media/$id'
+      preLoaderRoute: typeof ApiMediaIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/whatsapp/hub': {
+      id: '/api/whatsapp/hub'
+      path: '/api/whatsapp/hub'
+      fullPath: '/api/whatsapp/hub'
+      preLoaderRoute: typeof ApiWhatsappHubRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/whatsapp/ingest': {
+      id: '/api/whatsapp/ingest'
+      path: '/api/whatsapp/ingest'
+      fullPath: '/api/whatsapp/ingest'
+      preLoaderRoute: typeof ApiWhatsappIngestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/whatsapp/webhook': {
       id: '/api/whatsapp/webhook'
       path: '/api/whatsapp/webhook'
@@ -170,6 +230,9 @@ const rootRouteChildren: RootRouteChildren = {
   DeskRoute: DeskRoute,
   GroupsRoute: GroupsRouteWithChildren,
   ListingsIdRoute: ListingsIdRoute,
+  ApiMediaIdRoute: ApiMediaIdRoute,
+  ApiWhatsappHubRoute: ApiWhatsappHubRoute,
+  ApiWhatsappIngestRoute: ApiWhatsappIngestRoute,
   ApiWhatsappWebhookRoute: ApiWhatsappWebhookRoute,
 }
 export const routeTree = rootRouteImport

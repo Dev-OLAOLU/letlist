@@ -9,6 +9,15 @@ import {
   WHATSAPP_WEBHOOK_PATH,
   type WhatsappCloudStatus,
 } from "@/lib/whatsapp-config";
+import type { MetaPullReport } from "@/lib/whatsapp-graph";
+
+async function metaSecrets() {
+  return import("@/lib/whatsapp-secrets");
+}
+
+async function metaGraph() {
+  return import("@/lib/whatsapp-graph");
+}
 
 export type WhatsappConnection = {
   connected: boolean;
@@ -44,6 +53,22 @@ export type IngestSummary = {
   groupName: string;
   title: string | null;
   reason?: string;
+  mediaCount?: number;
+};
+
+export type MetaHubStatus = {
+  hasToken: boolean;
+  tokenTail: string;
+  phoneNumberId: string;
+  wabaId: string;
+  verifiedName: string;
+  displayPhone: string;
+  quality: string;
+  linked: boolean;
+  lastPullAt: string | null;
+  lastPullNote: string;
+  pullerRunning: boolean;
+  error: string | null;
 };
 
 async function ensureConnection() {
@@ -83,6 +108,100 @@ async function ensureConnection() {
 
 const toIso = (v: string | Date | null | undefined) =>
   !v ? null : typeof v === "string" ? v : v.toISOString();
+
+async function loadMetaHubStatus(): Promise<MetaHubStatus> {
+  await ensureConnection();
+  const sql = await getSql();
+  const s = await metaSecrets();
+  const creds = s.resolvedWhatsappCreds();
+  const beat = s.readHeartbeat();
+  const rows = await sql<{
+    meta_phone_number_id: string | null;
+    meta_verified_name: string | null;
+    meta_display_phone: string | null;
+    meta_waba_id: string | null;
+    last_pull_at: string | Date | null;
+    meta_error: string | null;
+  }>`
+    select meta_phone_number_id, meta_verified_name, meta_display_phone, meta_waba_id,
+      last_pull_at, meta_error
+    from whatsapp_connection where id = ${"desk"}
+  `;
+  const row = rows[0];
+  const phoneNumberId = creds.phoneNumberId || row?.meta_phone_number_id || "";
+  return {
+    hasToken: Boolean(creds.accessToken),
+    tokenTail: creds.accessToken ? s.tokenTail(creds.accessToken) : "",
+    phoneNumberId,
+    wabaId: creds.wabaId || row?.meta_waba_id || "",
+    verifiedName: row?.meta_verified_name || "",
+    displayPhone: row?.meta_display_phone || "",
+    quality: "",
+    linked: Boolean(creds.accessToken && phoneNumberId && row?.meta_verified_name),
+    lastPullAt: toIso(row?.last_pull_at ?? null),
+    lastPullNote: beat?.note || "",
+    pullerRunning: s.isPullerRunning(beat),
+    error: creds.accessToken ? row?.meta_error || null : null,
+  };
+}
+
+async function persistMetaProfile(report: {
+  profile: { id: string; verifiedName: string; displayPhone: string; wabaId: string } | null;
+  error: string | null;
+  note: string;
+}) {
+  const sql = await getSql();
+  const s = await metaSecrets();
+  const now = new Date().toISOString();
+  const profile = report.profile;
+  const creds = s.resolvedWhatsappCreds();
+  if (profile) {
+    const digits = normalizeNgPhone(profile.displayPhone);
+    await sql`
+      update whatsapp_connection set
+        meta_phone_number_id = ${profile.id},
+        meta_verified_name = ${profile.verifiedName || null},
+        meta_display_phone = ${profile.displayPhone || null},
+        meta_waba_id = ${profile.wabaId || creds.wabaId || null},
+        last_pull_at = ${now},
+        meta_error = ${null}
+      where id = ${"desk"}
+    `;
+    if (digits) {
+      await sql`
+        update whatsapp_connection
+        set inbox_phone = ${digits}
+        where id = ${"desk"} and (inbox_phone = ${DESK_WHATSAPP} or inbox_phone = ${""})
+      `;
+    }
+  } else {
+    await sql`
+      update whatsapp_connection
+      set meta_error = ${report.error}, last_pull_at = ${now}
+      where id = ${"desk"}
+    `;
+  }
+  s.writeHeartbeat({
+    pid: process.pid,
+    at: now,
+    ok: !report.error,
+    note: report.note,
+  });
+}
+
+async function applySuccessfulLink() {
+  const sql = await getSql();
+  const now = new Date().toISOString();
+  await sql`
+    update whatsapp_connection
+    set connected = true, connected_at = coalesce(connected_at, ${now})
+    where id = ${"desk"}
+  `;
+  const watched = await sql<{ n: number }>`select count(*)::int as n from listing_groups where watching = true`;
+  if ((watched[0]?.n ?? 0) === 0) {
+    await sql`update listing_groups set watching = true`;
+  }
+}
 
 export const getWhatsappStatus = createServerFn({ method: "POST" }).handler(async () => {
   const { bootstrapListings } = await import("@/lib/listing-api");
@@ -137,7 +256,19 @@ export const getWhatsappStatus = createServerFn({ method: "POST" }).handler(asyn
       agentPhone: row?.agent_phone || row?.inbox_phone || runtime.agentPhone,
       lastInboundAt: toIso(row?.last_inbound_at ?? null),
     } satisfies WhatsappConnection,
-    cloud: publicCloudStatus() satisfies WhatsappCloudStatus,
+    cloud: await (async () => {
+      const base = publicCloudStatus();
+      const s = await metaSecrets();
+      const creds = s.resolvedWhatsappCreds();
+      return {
+        ...base,
+        hasAccessToken: Boolean(creds.accessToken),
+        hasPhoneNumberId: Boolean(creds.phoneNumberId),
+        hasAppSecret: Boolean(creds.appSecret || base.hasAppSecret),
+        configured: Boolean(creds.accessToken && creds.phoneNumberId),
+      } satisfies WhatsappCloudStatus;
+    })(),
+    meta: await loadMetaHubStatus(),
     groups: groups.map(
       (g): WatchedGroup => ({
         id: g.id,
@@ -199,6 +330,170 @@ export const saveWhatsappNumbers = createServerFn({ method: "POST" })
     `;
     return { ok: true as const, inboxPhone: inbox, agentPhone: agent };
   });
+
+const metaKeysSchema = z.object({
+  accessToken: z.string().max(2000).optional(),
+  phoneNumberId: z.string().max(40).optional(),
+  wabaId: z.string().max(40).optional(),
+  appSecret: z.string().max(80).optional(),
+});
+
+async function saveKeysInner(data: z.infer<typeof metaKeysSchema>) {
+  await ensureConnection();
+  const s = await metaSecrets();
+  const existing = s.readMetaSecrets();
+  const accessToken = (data.accessToken || existing?.accessToken || "").trim();
+  const phoneNumberId = (data.phoneNumberId || existing?.phoneNumberId || "").replace(/\D/g, "");
+  if (!accessToken || !phoneNumberId) {
+    throw new Error("Access token and Phone number ID are both required.");
+  }
+  s.writeMetaSecrets({
+    accessToken,
+    phoneNumberId,
+    wabaId: data.wabaId,
+    appSecret: data.appSecret,
+  });
+  const sql = await getSql();
+  await sql`
+    update whatsapp_connection
+    set meta_phone_number_id = ${phoneNumberId}, meta_error = ${null}
+    where id = ${"desk"}
+  `;
+  return { ok: true as const, phoneNumberId, tokenTail: s.tokenTail(accessToken) };
+}
+
+async function connectInner(data: z.infer<typeof metaKeysSchema>) {
+  await ensureConnection();
+  const s = await metaSecrets();
+  const g = await metaGraph();
+  if (data.accessToken || data.phoneNumberId || data.wabaId || data.appSecret) {
+    const existing = s.readMetaSecrets();
+    s.writeMetaSecrets({
+      accessToken: data.accessToken || existing?.accessToken,
+      phoneNumberId: data.phoneNumberId || existing?.phoneNumberId,
+      wabaId: data.wabaId,
+      appSecret: data.appSecret,
+    });
+  }
+  const creds = s.resolvedWhatsappCreds();
+  if (!creds.accessToken || !creds.phoneNumberId) {
+    throw new Error("Paste the Meta access token and Phone number ID from API Setup.");
+  }
+  let profile;
+  try {
+    profile = await g.fetchPhoneProfile();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Could not reach Meta.";
+    await persistMetaProfile({ profile: null, error: message, note: message });
+    throw new Error(message);
+  }
+  const pulled = await g.pullFromMeta();
+  await persistMetaProfile({
+    profile: pulled.profile ?? profile,
+    error: pulled.error,
+    note: pulled.note,
+  });
+  if (!pulled.ok) throw new Error(pulled.error || "Meta connection failed.");
+  await applySuccessfulLink();
+  return {
+    ok: true as const,
+    verifiedName: (pulled.profile ?? profile).verifiedName,
+    displayPhone: (pulled.profile ?? profile).displayPhone,
+    phoneNumberId: (pulled.profile ?? profile).id,
+    note: pulled.note,
+    pulled: pulled.ingested,
+  };
+}
+
+async function pullInner() {
+  await ensureConnection();
+  const g = await metaGraph();
+  const pulled = await g.pullFromMeta();
+  await persistMetaProfile({
+    profile: pulled.profile,
+    error: pulled.error,
+    note: pulled.note,
+  });
+  if (pulled.ok) await applySuccessfulLink();
+  if (!pulled.ok) throw new Error(pulled.error || "Pull failed.");
+  return pulled;
+}
+
+export const saveMetaCloudKeys = createServerFn({ method: "POST" })
+  .validator((d: unknown) => metaKeysSchema.parse(d ?? {}))
+  .handler(async ({ data }) => saveKeysInner(data));
+
+export const connectMetaCloud = createServerFn({ method: "POST" })
+  .validator((d: unknown) => metaKeysSchema.parse(d ?? {}))
+  .handler(async ({ data }) => connectInner(data));
+
+export const pullMetaInbox = createServerFn({ method: "POST" }).handler(async () => pullInner());
+
+export async function handleWhatsappHub(body: unknown): Promise<{
+  ok: boolean;
+  action: string;
+  meta?: MetaHubStatus;
+  note?: string;
+  report?: MetaPullReport;
+  error?: string;
+}> {
+  const parsed = z
+    .object({
+      action: z.enum(["status", "save", "connect", "pull", "tick"]).default("status"),
+      accessToken: z.string().max(2000).optional(),
+      phoneNumberId: z.string().max(40).optional(),
+      wabaId: z.string().max(40).optional(),
+      appSecret: z.string().max(80).optional(),
+    })
+    .parse(body ?? {});
+
+  if (parsed.action === "save") {
+    await saveKeysInner({
+      accessToken: parsed.accessToken,
+      phoneNumberId: parsed.phoneNumberId,
+      wabaId: parsed.wabaId,
+      appSecret: parsed.appSecret,
+    });
+    return { ok: true, action: "save", meta: await loadMetaHubStatus(), note: "Keys stored on this machine." };
+  }
+
+  if (parsed.action === "connect") {
+    const result = await connectInner({
+      accessToken: parsed.accessToken,
+      phoneNumberId: parsed.phoneNumberId,
+      wabaId: parsed.wabaId,
+      appSecret: parsed.appSecret,
+    });
+    return { ok: true, action: "connect", meta: await loadMetaHubStatus(), note: result.note };
+  }
+
+  if (parsed.action === "pull" || parsed.action === "tick") {
+    const s = await metaSecrets();
+    const creds = s.resolvedWhatsappCreds();
+    if (!creds.accessToken || !creds.phoneNumberId) {
+      const note = "Waiting for Meta keys on this machine.";
+      s.writeHeartbeat({ pid: process.pid, at: new Date().toISOString(), ok: true, note });
+      const sql = await getSql();
+      await sql`update whatsapp_connection set meta_error = ${null} where id = ${"desk"}`;
+      return { ok: true, action: parsed.action, meta: await loadMetaHubStatus(), note };
+    }
+    try {
+      const report = await pullInner();
+      return {
+        ok: true,
+        action: parsed.action,
+        meta: await loadMetaHubStatus(),
+        note: report.note,
+        report,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Pull failed.";
+      return { ok: false, action: parsed.action, meta: await loadMetaHubStatus(), note: message, error: message };
+    }
+  }
+
+  return { ok: true, action: "status", meta: await loadMetaHubStatus() };
+}
 
 export const connectWhatsappInbox = createServerFn({ method: "POST" }).handler(async () => {
   const { bootstrapListings } = await import("@/lib/listing-api");

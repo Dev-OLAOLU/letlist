@@ -12,6 +12,7 @@ coverage
 .node_modules.lock
 artifacts
 screenshots
+.data
 .grok/*
 !.grok/app-env.json
 AGENTS.md

@@ -19,9 +19,11 @@ export const Route = createFileRoute("/api/whatsapp/webhook")({
       POST: async ({ request }) => {
         const raw = await request.text();
         const runtime = whatsappRuntime();
-        if (runtime.signatureRequired) {
+        const { resolvedWhatsappCreds } = await import("@/lib/whatsapp-secrets");
+        const appSecret = runtime.appSecret || resolvedWhatsappCreds().appSecret;
+        if (appSecret) {
           const header = request.headers.get("x-hub-signature-256");
-          if (!verifyWhatsappSignature(raw, header, runtime.appSecret as string)) {
+          if (!verifyWhatsappSignature(raw, header, appSecret)) {
             return new Response("Forbidden", { status: 403 });
           }
         }
