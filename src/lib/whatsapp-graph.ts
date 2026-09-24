@@ -40,9 +40,16 @@ function graphErrorMessage(json: unknown, status: number): string {
   if (json && typeof json === "object" && "error" in json) {
     const err = (json as { error?: { message?: string; error_user_msg?: string } }).error;
     const message = err?.error_user_msg || err?.message;
-    if (typeof message === "string" && message.trim()) return redactSecrets(message.trim());
+    if (typeof message === "string" && message.trim()) return humanizeMetaError(redactSecrets(message.trim()));
   }
   return `Meta returned ${status}.`;
+}
+
+function humanizeMetaError(message: string): string {
+  if (/session has expired|error validating access token/i.test(message)) {
+    return "The Meta access token expired. In Graph API Explorer, generate a new token. In Vercel, replace WHATSAPP_ACCESS_TOKEN, save, and redeploy. A temporary token lasts about a day.";
+  }
+  return message;
 }
 
 async function graphGet(path: string, token: string, params: Record<string, string> = {}): Promise<unknown> {
@@ -197,8 +204,22 @@ export function parsePhoneProfile(json: unknown): MetaPhoneProfile {
   };
 }
 
-export async function fetchPhoneProfile(): Promise<MetaPhoneProfile> {
+export type MetaCredsOverride = {
+  accessToken?: string;
+  phoneNumberId?: string;
+  wabaId?: string;
+};
+
+function activeCreds(override?: MetaCredsOverride) {
   const creds = resolvedWhatsappCreds();
+  const accessToken = override?.accessToken?.trim() || creds.accessToken;
+  const phoneNumberId = (override?.phoneNumberId || creds.phoneNumberId).replace(/\s/g, "");
+  const wabaId = override?.wabaId?.trim() || creds.wabaId;
+  return { ...creds, accessToken, phoneNumberId, wabaId };
+}
+
+export async function fetchPhoneProfile(override?: MetaCredsOverride): Promise<MetaPhoneProfile> {
+  const creds = activeCreds(override);
   if (!creds.accessToken || !creds.phoneNumberId) {
     throw new Error("Paste the Meta access token and Phone number ID, then Connect Meta.");
   }
@@ -225,8 +246,8 @@ function countData(payload: unknown): number {
   return 0;
 }
 
-export async function pullFromMeta(): Promise<MetaPullReport> {
-  const creds = resolvedWhatsappCreds();
+export async function pullFromMeta(override?: MetaCredsOverride): Promise<MetaPullReport> {
+  const creds = activeCreds(override);
   if (!creds.accessToken || !creds.phoneNumberId) {
     return {
       ok: false,
@@ -241,7 +262,7 @@ export async function pullFromMeta(): Promise<MetaPullReport> {
 
   let profile: MetaPhoneProfile;
   try {
-    profile = await fetchPhoneProfile();
+    profile = await fetchPhoneProfile(override);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Could not reach Meta.";
     return {

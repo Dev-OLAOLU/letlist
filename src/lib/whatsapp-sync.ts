@@ -342,17 +342,41 @@ async function saveKeysInner(data: z.infer<typeof metaKeysSchema>) {
   await ensureConnection();
   const s = await metaSecrets();
   const existing = s.readMetaSecrets();
-  const accessToken = (data.accessToken || existing?.accessToken || "").trim();
-  const phoneNumberId = (data.phoneNumberId || existing?.phoneNumberId || "").replace(/\D/g, "");
+  const envCreds = s.resolvedWhatsappCreds();
+  const accessToken = (data.accessToken || existing?.accessToken || envCreds.accessToken || "").trim();
+  const phoneNumberId = (data.phoneNumberId || existing?.phoneNumberId || envCreds.phoneNumberId || "").replace(
+    /\D/g,
+    "",
+  );
   if (!accessToken || !phoneNumberId) {
     throw new Error("Access token and Phone number ID are both required.");
   }
-  s.writeMetaSecrets({
-    accessToken,
-    phoneNumberId,
-    wabaId: data.wabaId,
-    appSecret: data.appSecret,
-  });
+  const pasted = Boolean(data.accessToken || data.phoneNumberId || data.wabaId || data.appSecret);
+  if (!pasted) {
+    const sql = await getSql();
+    await sql`
+      update whatsapp_connection
+      set meta_phone_number_id = ${phoneNumberId}, meta_error = ${null}
+      where id = ${"desk"}
+    `;
+    return { ok: true as const, phoneNumberId, tokenTail: s.tokenTail(accessToken) };
+  }
+  try {
+    s.writeMetaSecrets({
+      accessToken,
+      phoneNumberId,
+      wabaId: data.wabaId,
+      appSecret: data.appSecret,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "";
+    if (message.includes("Could not store Meta keys")) {
+      throw new Error(
+        "This site cannot store a new token. In Vercel, replace WHATSAPP_ACCESS_TOKEN, save, and redeploy.",
+      );
+    }
+    throw err;
+  }
   const sql = await getSql();
   await sql`
     update whatsapp_connection
@@ -366,28 +390,38 @@ async function connectInner(data: z.infer<typeof metaKeysSchema>) {
   await ensureConnection();
   const s = await metaSecrets();
   const g = await metaGraph();
-  if (data.accessToken || data.phoneNumberId || data.wabaId || data.appSecret) {
+  const override = {
+    accessToken: data.accessToken?.trim() || undefined,
+    phoneNumberId: data.phoneNumberId?.replace(/\D/g, "") || undefined,
+    wabaId: data.wabaId?.trim() || undefined,
+  };
+  if (override.accessToken || override.phoneNumberId || data.wabaId || data.appSecret) {
     const existing = s.readMetaSecrets();
-    s.writeMetaSecrets({
-      accessToken: data.accessToken || existing?.accessToken,
-      phoneNumberId: data.phoneNumberId || existing?.phoneNumberId,
-      wabaId: data.wabaId,
-      appSecret: data.appSecret,
-    });
+    try {
+      s.writeMetaSecrets({
+        accessToken: data.accessToken || existing?.accessToken,
+        phoneNumberId: data.phoneNumberId || existing?.phoneNumberId,
+        wabaId: data.wabaId,
+        appSecret: data.appSecret,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (!message.includes("Could not store Meta keys")) throw err;
+    }
   }
   const creds = s.resolvedWhatsappCreds();
-  if (!creds.accessToken || !creds.phoneNumberId) {
+  if (!(override.accessToken || creds.accessToken) || !(override.phoneNumberId || creds.phoneNumberId)) {
     throw new Error("Paste the Meta access token and Phone number ID from API Setup.");
   }
   let profile;
   try {
-    profile = await g.fetchPhoneProfile();
+    profile = await g.fetchPhoneProfile(override);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Could not reach Meta.";
     await persistMetaProfile({ profile: null, error: message, note: message });
     throw new Error(message);
   }
-  const pulled = await g.pullFromMeta();
+  const pulled = await g.pullFromMeta(override);
   await persistMetaProfile({
     profile: pulled.profile ?? profile,
     error: pulled.error,
