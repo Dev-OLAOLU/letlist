@@ -210,7 +210,6 @@ export async function fetchPhoneProfile(): Promise<MetaPhoneProfile> {
       "quality_rating",
       "code_verification_status",
       "platform_type",
-      "whatsapp_business_account{id,name}",
     ].join(","),
   });
   const profile = parsePhoneProfile(json);
