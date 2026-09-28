@@ -395,18 +395,19 @@ async function connectInner(data: z.infer<typeof metaKeysSchema>) {
     phoneNumberId: data.phoneNumberId?.replace(/\D/g, "") || undefined,
     wabaId: data.wabaId?.trim() || undefined,
   };
-  if (override.accessToken || override.phoneNumberId || data.wabaId || data.appSecret) {
+  if (override.accessToken || data.appSecret) {
     const existing = s.readMetaSecrets();
+    const envCreds = s.resolvedWhatsappCreds();
     try {
       s.writeMetaSecrets({
-        accessToken: data.accessToken || existing?.accessToken,
-        phoneNumberId: data.phoneNumberId || existing?.phoneNumberId,
+        accessToken: data.accessToken || existing?.accessToken || envCreds.accessToken,
+        phoneNumberId: data.phoneNumberId || existing?.phoneNumberId || envCreds.phoneNumberId,
         wabaId: data.wabaId,
         appSecret: data.appSecret,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
-      if (!message.includes("Could not store Meta keys")) throw err;
+      if (!message.includes("Could not store Meta keys") && !message.includes("both required")) throw err;
     }
   }
   const creds = s.resolvedWhatsappCreds();
