@@ -9,6 +9,14 @@ export function ListingGallery({ listing }: { listing: Listing }) {
   const current = media[active];
 
   if (media.length === 0) {
+    const stock = listing.imageKey.startsWith("med-") || listing.imageKey.startsWith("/");
+    if (!stock) {
+      return (
+        <div className="flex aspect-[16/10] items-center justify-center rounded-xl bg-bg-subtle px-6 text-center text-sm text-fg-muted sm:aspect-[2/1]">
+          No photo on this post yet.
+        </div>
+      );
+    }
     return (
       <div className="overflow-hidden rounded-xl bg-bg-subtle">
         <img

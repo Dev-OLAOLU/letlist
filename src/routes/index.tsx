@@ -167,7 +167,7 @@ function Home() {
             <p className="mt-1 text-sm text-fg-muted">
               {search.group
                 ? groupsQuery.data?.find((g) => g.id === search.group)?.name
-                : "Pulled from six WhatsApp groups your desk already watches."}
+                : "Only posts forwarded to the Ayan Realty WhatsApp line."}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -231,8 +231,14 @@ function Home() {
           </div>
         ) : listings.length === 0 ? (
           <div className="mt-10 rounded-xl border border-dashed border-border-strong bg-bg-elevated px-6 py-16 text-center">
-            <p className="font-display text-xl tracking-tight">Nothing live for that search.</p>
-            <p className="mt-2 text-sm text-fg-muted">Widen the area or paste a fresh post from a group on the desk.</p>
+            <p className="font-display text-xl tracking-tight">
+              {hasFilters ? "Nothing live for that search." : "No listings yet."}
+            </p>
+            <p className="mt-2 text-sm text-fg-muted">
+              {hasFilters
+                ? "Widen the area or forward a fresh post to the Ayan Realty line."
+                : "Forward a listing, with its photos, to +234 905 961 3775. It shows up here."}
+            </p>
             <div className="mt-6 flex justify-center gap-2">
               <Button variant="outline" onClick={() => void navigate({ search: {} })}>
                 Reset search

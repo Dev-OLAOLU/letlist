@@ -10,6 +10,7 @@ import {
 } from "@/lib/listings";
 import { SEED_GROUPS, SEED_LISTINGS } from "@/lib/seed";
 import { ensureListingsSchema } from "@/lib/listing-schema";
+import { env } from "@/lib/env.server";
 
 const propertyTypeSchema = z.enum([
   "self-contain",
@@ -122,6 +123,19 @@ const LISTING_SELECT = `
 async function seedIfEmpty() {
   const sql = await getSql();
   await ensureListingsSchema();
+  if (env("WHATSAPP_ACCESS_TOKEN")) {
+    for (const listing of SEED_LISTINGS) {
+      await sql`delete from listings where id = ${listing.id}`;
+    }
+    for (const group of SEED_GROUPS) {
+      await sql`
+        delete from listing_groups
+        where id = ${group.id}
+          and not exists (select 1 from listings where group_id = ${group.id})
+      `;
+    }
+    return;
+  }
   const countRows = await sql<{ n: number }>`select count(*)::int as n from listing_groups`;
   if ((countRows[0]?.n ?? 0) > 0) return;
 

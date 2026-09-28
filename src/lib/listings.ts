@@ -127,7 +127,10 @@ export function listingCoverSrc(listing: Pick<Listing, "imageKey" | "media">): s
   if (photo) return `/api/media/${photo.id}`;
   const video = listing.media?.find((m) => m.kind === "video");
   if (video) return `/api/media/${video.id}`;
-  return listingImageSrc(listing.imageKey);
+  if (listing.imageKey.startsWith("med-") || listing.imageKey.startsWith("/")) {
+    return listingImageSrc(listing.imageKey);
+  }
+  return "";
 }
 
 export function formatNaira(n: number): string {

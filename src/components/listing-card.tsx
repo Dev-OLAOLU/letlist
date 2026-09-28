@@ -9,6 +9,7 @@ import {
 } from "@/lib/listings";
 
 export function ListingCard({ listing }: { listing: Listing }) {
+  const cover = listingCoverSrc(listing);
   const posted = formatDistanceToNow(new Date(listing.postedAt), { addSuffix: true });
   const media = listing.media ?? [];
   const coverVideo = media.length > 0 && !media.some((m) => m.kind === "image") && media[0]?.kind === "video";
@@ -29,12 +30,16 @@ export function ListingCard({ listing }: { listing: Listing }) {
             preload="metadata"
             className="size-full object-cover"
           />
-        ) : (
+        ) : cover ? (
           <img
-            src={listingCoverSrc(listing)}
+            src={cover}
             alt=""
             className="size-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03]"
           />
+        ) : (
+          <div className="flex size-full items-center justify-center px-6 text-center text-sm text-fg-muted">
+            Waiting for the WhatsApp photo
+          </div>
         )}
         {coverVideo ? (
           <span className="absolute inset-0 flex items-center justify-center bg-fg/25">

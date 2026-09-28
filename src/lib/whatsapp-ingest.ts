@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { getSql } from "@/lib/db";
-import { LISTING_IMAGE_KEYS } from "@/lib/listings";
 import { extractGroupName, parseWhatsappPost, type ParsedListing } from "@/lib/whatsapp-parser";
 import { LIVE_GROUP_POSTS } from "@/lib/whatsapp-live-posts";
 import {
@@ -45,18 +44,8 @@ function fingerprint(groupId: string, parsed: ParsedListing): string {
   return createHash("sha256").update(raw).digest("hex").slice(0, 24);
 }
 
-function imageFor(parsed: ParsedListing): string {
-  if (parsed.propertyType === "duplex" || parsed.propertyType === "terrace" || parsed.propertyType === "bungalow") {
-    return "ajah-duplex";
-  }
-  if (parsed.propertyType === "self-contain" || parsed.propertyType === "studio") return "yaba-selfcontain";
-  if (parsed.area === "Victoria Island" || parsed.area === "Ikoyi" || parsed.area === "Oniru") return "vi-living";
-  if (parsed.area === "Ikeja" || parsed.area === "Maryland") return "ikeja-miniflat";
-  if (parsed.area === "Magodo" || parsed.area === "Ogudu") return "magodo-estate";
-  if (parsed.area === "Surulere" || parsed.area === "Gbagada") return "surulere-living";
-  if (parsed.propertyType === "penthouse") return "ikoyi-bedroom";
-  if (parsed.amenities.includes("Fitted kitchen")) return "kitchen";
-  return LISTING_IMAGE_KEYS[0];
+function imageFor(_parsed: ParsedListing): string {
+  return "none";
 }
 
 async function knownGroupNames(): Promise<string[]> {
